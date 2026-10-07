@@ -31,7 +31,9 @@
     "nrf54l15-xiao": 28,
     "ee02": 29,
     "good-display-133c02": 30,
-    "m5-papers3": 31
+    "m5-papers3": 31,
+    "hanshow-pro-154qn": 32,
+    "hanshow-pro-266qn": 33
   },
   "displays": {
     "ep154-200x200": 1,
@@ -79,7 +81,9 @@
     "ep215yr-160x296": 43,
     "m5-papers3-960x540": 44,
     "m5-papers3-960x540-4gray": 45,
-    "ep37yr-240x416": 46
+    "ep37yr-240x416": 46,
+    "hanshow-pro-154qn": 47,
+    "hanshow-pro-266qn": 48
   },
   "powerOptions": {
     "usb": 1,

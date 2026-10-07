@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hanshow indexed 16 input - OpenDisplay</title>
+  <link rel="icon" href="../assets/brand/logo-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../css/colors_and_type.css">
+  <link rel="stylesheet" href="../css/inner.css">
+  <link rel="stylesheet" href="../css/doc.css">
+</head>
+<body><main class="container">
+  <h1>Hanshow indexed 16 input</h1>
+  <p>This experimental Telink support targets Pro-154Q-N C3HW2 / HSEL4Q_01_54M_39
+  (200 × 200, panel 1035) and Pro-266Q-N E3LW2 / HSEL7_02_66M_30
+  (152 × 296, panel 1036). Orientation, temperature range and optical repeatability
+  require validation on those exact specimens. Other PCB, flex or factory waveform
+  revisions must be qualified separately.</p>
+  <p>The tags accept 16 drive codes. Seven optical states have been observed:
+  black, white, yellow, red, orange/coral, light gray and dark gray.
+  Accepted drive codes are electrical combinations, and do not establish
+  16 distinct measured colors. RGB conversion defaults to seven nominal,
+  uncalibrated RGB swatches. Tester and Designer also offer an opt-in
+  <strong>Experimental 12 — uncalibrated</strong> palette for the 2.66-inch panel
+  (1036), restoring the earlier fox-image estimates. Its additional entries are
+  dusty pink, khaki, middle gray, warm salmon and muted mauve. All twelve estimates,
+  including its muted base colors, are provisional; twelve distinct optical
+  colors have not been measured. It is unavailable for the 1.54-inch panel.</p>
+  <p>RGB palette selection is a host conversion setting and changes neither
+  color mode 10 nor the exact-input logical-index map. The twelve-entry RGB
+  palette uses compact indices 0–11 inside the converter; these are mapped
+  directly to drive codes and are not the sixteen stable logical indices.
+  Preview swatches and histogram names use the selected host palette.
+  Canonical host metadata is maintained in OpenDisplay/opendisplay-protocol.</p>
+  <h2>Exact input</h2>
+  <p>The Tester and Designer offer an exact binary upload for a connected panel.
+  Select one index per byte (0–15), or packed 4-bit input with the first pixel
+  in the high nibble. Files must match native geometry exactly: no resizing,
+  fitting, rotation or dithering is applied. Logical indices and raw drive codes
+  are separate, explicitly selected interpretations.</p>
+  <pre><code>logical index:  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
+ drive code:   4  5  9 13  1  6  7  0  2  3  8 10 11 12 14 15</code></pre>
+  <p>Logical indices 0–6 represent the seven observed states in the order above.
+  Indices 7–15 remain diagnostic drive combinations with unqualified optics.
+  Raw drive-code input bypasses the logical lookup, enabling exhaustive tests.
+  Ordinary images still follow the usual RGB conversion workflow.</p>
+  <h2>Device stream: color scheme 10, INDEXED16_2PASS</h2>
+  <p>After any normal image fitting and configured rotation, map indices to drive
+  codes once. Pack the complete upper two-bit component first, then the complete
+  lower two-bit component. The 1.54-inch panel (1035) traverses columns from left
+  to right, and pixels within each column from top to bottom: controller position
+  <code>j</code> receives image pixel <code>(x=floor(j/200), y=j%200)</code>.
+  The 2.66-inch panel (1036) traverses native rows from bottom to top, and pixels
+  within each row from left to right. Four two-bit values occupy each byte,
+  first pixel in bits 7–6. Each traversed line is padded independently to byte
+  boundaries; neither native geometry requires padding. Input images and exact
+  files remain in ordinary top-to-bottom, left-to-right image order.</p>
+  <pre><code>upper = (drive_code &gt;&gt; 2) &amp; 3
+lower = drive_code &amp; 3
+byte = (pixel0 &lt;&lt; 6) | (pixel1 &lt;&lt; 4) | (pixel2 &lt;&lt; 2) | pixel3
+panel 1036, raw codes 0..15, width 16, height 1:
+00 55 AA FF 1B 1B 1B 1B
+panel 1035, raw codes 0..15 row-major, width 4, height 4:
+1B 1B 1B 1B 00 55 AA FF</code></pre>
+  <p>The full wire payload is 20,000 bytes for the 154 and 22,496 bytes for the
+  266. Exported device wire bytes already have this layout; they must not be
+  re-imported as packed 4-bit pixel input.</p>
+  <h2>Transfer and refresh</h2>
+  <p>Use existing direct-write START (0x0070), DATA (0x0071) and END (0x0072).
+  Existing streaming zlib compression remains optional. PIPE and partial updates
+  are disabled for these panel profiles. The device streams each component into
+  controller storage and refreshes it before receiving the next component.</p>
+  <p>A refresh may occur while decompressing START, DATA or END. Scheme 10 therefore
+  allows 215 seconds for each acknowledgment and final refresh completion;
+  ordinary formats keep their existing limits. Interrupted uploads may leave
+  an intermediate visible image. Upload a new complete image to recover it.</p>
+  <h2>Waveforms and installation</h2>
+  <p>Panel-specific factory waveform provenance and redistribution permission must
+  be resolved before publishing waveform-bearing binaries. An owner-provisioned
+  build extracts only the compatible waveform records from the owner's original
+  factory backup. Keep that backup private and intact; firmware/settings writes
+  can overwrite the original records. Missing or incompatible records must cause
+  the driver to refuse refresh.</p>
+  <p>The panel profiles encode PB5 enable (active low), PD4 reset, PB7 DC, PA1 BUSY
+  (high means ready), PD2 chip select, PD7 clock and PB6 data. Rotation defaults
+  to zero; the host applies the panel-specific controller scan order. Unknown physical
+  size and power consumption fields remain unset rather than estimated.</p>
+  <p>These approximately 32 KiB RAM tags require the constrained 32 KiB Telink
+  build profile. The default target profile uses a 64 KiB SRAM layout and is
+  unsuitable for these specimens. Selecting a website preset only writes the
+  device configuration: it does not select a compiled memory profile, install
+  waveforms or convert a default build into a compatible build. Use the target
+  build documentation and provision compatible waveform records into a fresh
+  output directory outside the repository, keeping generated records private:</p>
+  <pre><code>python3 targets/telink-tlsr/tools/provision_hanshow_waveforms.py \
+  --manifest /private/input.json --output /tmp/owner-waveforms</code></pre>
+  <p>Then configure the Telink build with <code>-DOD_TLSR_SRAM_KIB=32</code> and
+  <code>-DOD_HANSHOW_WAVEFORM_SOURCE=/tmp/owner-waveforms/hanshow_waveforms.c</code>.
+  These commands refer to paths in the firmware repository. A build without
+  compatible generated records deliberately refuses display refresh.</p>
+  <p>Use the <a href="https://github.com/g4bri3lDev/Firmware_Unified/tree/feat/telink-tlsr/targets/telink-tlsr">Telink target installation documentation</a>.
+  The website does not supply a USB installer or a prebuilt release for these profiles.</p>
+  <p><a href="display-data-format.html">Other display data formats</a> ·
+  <a href="../firmware/display/">Tester</a> · <a href="../designer/">Designer</a></p>
+</main></body>
+</html>

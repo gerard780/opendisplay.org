@@ -89,6 +89,9 @@ ble_proto:
           9:
             name: ESP32
             description: classic ESP32 based boards
+          10:
+            name: TLSR825X
+            description: Telink TLSR825x
       - name: communication_modes
         size: 1
         description: Supported communication modes (bitfield)
@@ -180,6 +183,9 @@ ble_proto:
           6:
             name: good_display
             description: Good Display
+          7:
+            name: hanshow
+            description: Hanshow
       - name: board_type
         size: 1
         description: Board identifier (depends on manufacturer_id)
@@ -285,6 +291,13 @@ ble_proto:
               0:
                 name: ESP32_133C02
                 description: ESP32-133C02 (ESP32-S3, 7.09"/13.3" Spectra6 driver board)
+            7:
+              0:
+                name: PRO154QN
+                description: Pro-154Q-N C3HW2 / HSEL4Q_01_54M_39
+              1:
+                name: PRO266QN
+                description: Pro-266Q-N E3LW2 / HSEL7_02_66M_30
       - name: board_revision
         size: 1
         description: Board revision number
@@ -797,6 +810,12 @@ ble_proto:
           3001:
             name: ed103tc2_1872x1404_4gray
             description: Same panel as 3000; 4bpp (16-level; FastEPD IT8951 path)
+          1035:
+            name: PRO154QN
+            description: Hanshow Pro-154Q-N 200x200 C3HW2 HSEL4Q_01_54M_39
+          1036:
+            name: PRO266QN
+            description: Hanshow Pro-266Q-N 152x296 E3LW2 HSEL7_02_66M_30
           3002:
             name: inkplate5v2_1280x720
             description: Soldered Inkplate 5 V2 (ED050WROW, 1280x720; FastEPD native parallel path)
@@ -896,6 +915,9 @@ ble_proto:
           8:
             name: bwgbry_split
             description: Spectra 6 same nibbles as bwgbry, packed left-half plane then right-half plane (dual-CS panels, no device framebuffer)
+          10:
+            name: indexed16_2pass
+            description: 16 accepted drive codes; upper 2-bit component then lower, native rows reversed; optical RGB provisional
           100:
             name: RGB565
             description: RGB565

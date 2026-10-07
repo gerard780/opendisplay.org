@@ -7,6 +7,13 @@ on:
       - 'httpdocs/firmware/toolbox/simple-config-id-registry.json'
       - 'httpdocs/firmware/toolbox/bin/**'
       - 'httpdocs/firmware/toolbox/firmware/**'
+      - 'httpdocs/js/ble-common.js'
+      - 'httpdocs/js/dither.js'
+      - 'httpdocs/js/hanshow-rgb-palettes.*'
+      - 'httpdocs/designer/index.html'
+      - 'httpdocs/firmware/display/index.html'
+      - 'httpdocs/js/hanshow-exact-input.js'
+      - 'tests/**'
       - '.github/scripts/validate-simple-config-presets.py'
       - '.github/workflows/validate-simple-config.yml'
   push:
@@ -16,6 +23,13 @@ on:
       - 'httpdocs/firmware/toolbox/simple-config-id-registry.json'
       - 'httpdocs/firmware/toolbox/bin/**'
       - 'httpdocs/firmware/toolbox/firmware/**'
+      - 'httpdocs/js/ble-common.js'
+      - 'httpdocs/js/dither.js'
+      - 'httpdocs/js/hanshow-rgb-palettes.*'
+      - 'httpdocs/designer/index.html'
+      - 'httpdocs/firmware/display/index.html'
+      - 'httpdocs/js/hanshow-exact-input.js'
+      - 'tests/**'
       - '.github/scripts/validate-simple-config-presets.py'
       - '.github/workflows/validate-simple-config.yml'
   workflow_dispatch:
@@ -66,3 +80,9 @@ jobs:
             ARGS+=(--base-registry "${{ steps.base.outputs.path }}")
           fi
           python3 .github/scripts/validate-simple-config-presets.py "${ARGS[@]}"
+
+      - name: Validate indexed input and RGB conversion
+        run: |
+          node tests/hanshow-indexed16.test.cjs
+          node tests/hanshow-dither.test.mjs
+          node tests/hanshow-palette-ui.test.mjs

@@ -1,0 +1,162 @@
+{
+  "format": "INDEXED16_2PASS",
+  "color_scheme": 10,
+  "config_version": [
+    1,
+    6
+  ],
+  "ic_type": 10,
+  "manufacturer_id": 7,
+  "component_bits": [
+    "upper2",
+    "lower2"
+  ],
+  "pixels_per_byte": 4,
+  "pixel_pair_order": "most_significant_first",
+  "row_order": "panel_specific",
+  "panels": [
+    {
+      "name": "HANSHOW_PRO154QN",
+      "panel_ic_type": 1035,
+      "width": 200,
+      "height": 200,
+      "component_bytes": 10000,
+      "wire_bytes": 20000,
+      "logical_to_drive": [
+        4,
+        5,
+        9,
+        13,
+        1,
+        6,
+        7,
+        0,
+        2,
+        3,
+        8,
+        10,
+        11,
+        12,
+        14,
+        15
+      ],
+      "row_order": "transpose"
+    },
+    {
+      "name": "HANSHOW_PRO266QN",
+      "panel_ic_type": 1036,
+      "width": 152,
+      "height": 296,
+      "component_bytes": 11248,
+      "wire_bytes": 22496,
+      "logical_to_drive": [
+        4,
+        5,
+        9,
+        13,
+        1,
+        6,
+        7,
+        0,
+        2,
+        3,
+        8,
+        10,
+        11,
+        12,
+        14,
+        15
+      ],
+      "row_order": "bottom_to_top"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "all_drive_codes",
+      "semantics": "drive_codes",
+      "width": 16,
+      "height": 1,
+      "pixels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "packed4_hex": "0123456789abcdef",
+      "upper2_hex": "0055aaff",
+      "lower2_hex": "1b1b1b1b",
+      "wire_hex": "0055aaff1b1b1b1b",
+      "panel_ic_type": 1036
+    },
+    {
+      "name": "logical_indices_two_rows",
+      "semantics": "logical_indices",
+      "width": 8,
+      "height": 2,
+      "pixels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "packed4_hex": "0123456789abcdef",
+      "upper2_hex": "0abf5b14",
+      "lower2_hex": "b2cb156c",
+      "wire_hex": "0abf5b14b2cb156c",
+      "panel_ic_type": 1036
+    },
+    {
+      "name": "154_transposed_drive_codes",
+      "panel_ic_type": 1035,
+      "semantics": "drive_codes",
+      "width": 4,
+      "height": 4,
+      "pixels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "packed4_hex": "0123456789abcdef",
+      "upper2_hex": "1b1b1b1b",
+      "lower2_hex": "0055aaff",
+      "wire_hex": "1b1b1b1b0055aaff"
+    }
+  ]
+}

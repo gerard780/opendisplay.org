@@ -3558,7 +3558,12 @@ function updateInstallStepForBoard(board) {
   const update = tbMode === 'update';
   note.hidden = !(noInstaller || browserCant);
   if (noInstaller) {
-    note.innerHTML = 'This board isn\u2019t flashed over USB from here. See <a href="../reusing_solum_displays.html">how to flash it</a>' + (update ? '.' : ', then continue.');
+    const guide = board.installConfig.guideUrl || '../reusing_solum_displays.html';
+    note.replaceChildren(document.createTextNode('This board uses an external installation guide. '));
+    const link = document.createElement('a');
+    link.href = guide;
+    link.textContent = 'Read the installation guide';
+    note.append(link, document.createTextNode(update ? '.' : ', then continue.'));
   } else if (browserCant) {
     note.textContent = 'This browser can\u2019t install firmware. Use Chrome or Edge on a computer.' + (update ? '' : ' If the firmware is already on the device, continue.');
   }

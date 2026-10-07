@@ -22,13 +22,33 @@ const CONFIG_WRITE_ACK_TIMEOUT_MS = 15000;
 // end 0x72) from the device. A stalled transfer that never gets a response aborts
 // the upload instead of leaving the UI stuck at "Uploading N%" forever. The
 // display-refresh phase (waiting for 0x73) is bounded by the firmware's own
-// refresh timeout (0x74), so the ack timer is cleared once the end command acks.
+// refresh timeout (0x74). INDEXED16_2PASS also bounds that final wait in the client.
 const DIRECT_WRITE_ACK_TIMEOUT_MS = 15000;
 
 // Some firmware (seen on v2.3.0 with a 2.6" BWRY panel) only acks the end command
 // (0x72) after the display refresh finishes, which takes ~20 s on color e-paper.
 // Give that one step a longer bound so a successful upload isn't reported as a timeout.
 const DIRECT_WRITE_END_ACK_TIMEOUT_MS = 60000;
+// A Hanshow pass can run while inflating START, DATA or END.
+const INDEXED16_2PASS_TIMEOUT_MS = 215000;
+const HANSHOW_INDEX_TO_DRIVE = [4, 5, 9, 13, 1, 6, 7, 0, 2, 3, 8, 10, 11, 12, 14, 15];
+// Seven observed states; these RGB estimates are uncalibrated.
+const HANSHOW_RGB = [[0, 0, 0], [255, 255, 255], [255, 255, 0], [255, 0, 0], [255, 128, 0], [192, 192, 192], [64, 64, 64]];
+const HANSHOW_NAMES = ['black', 'white', 'yellow', 'red', 'orange', 'lightgray', 'darkgray'];
+function hanshowRgbPalette(id = 'observed7', panelIcType = null) {
+  if (id === 'observed7') return {rgb: HANSHOW_RGB, names: HANSHOW_NAMES, codes: HANSHOW_INDEX_TO_DRIVE};
+  if (!globalThis.OpenDisplayHanshowPalettes) throw new Error('Hanshow RGB palette metadata has not loaded');
+  const profile = globalThis.OpenDisplayHanshowPalettes.resolve(id, panelIcType);
+  return {rgb: profile.entries.map(e => e.rgb), names: profile.entries.map(e => e.name), codes: profile.entries.map(e => e.drive_code)};
+}
+function hanshowNearestIndex(r, g, b, colors = HANSHOW_RGB) {
+  let best = 0, distance = Infinity;
+  colors.forEach((c, i) => {
+    const d = (r - c[0]) ** 2 + (g - c[1]) ** 2 + (b - c[2]) ** 2;
+    if (d < distance) { best = i; distance = d; }
+  });
+  return best;
+}
 
 // PIPE_WRITE (sliding-window) upload tuning. The web tester attempts a windowed
 // 0x0080/0x0081/0x0082 transfer when the device config advertises it
@@ -3530,7 +3550,11 @@ class OpenDisplayBLE {
    * @param {number} colorScheme - Color scheme (0-8)
    * @returns {string} Color name ('black', 'white', 'red', 'yellow', 'green', 'blue', 'orange')
    */
-  detectColor(r, g, b, colorScheme) {
+  detectColor(r, g, b, colorScheme, rgbPalette = 'observed7', panelIcType = null) {
+    if (colorScheme === 10) {
+      const palette = hanshowRgbPalette(rgbPalette, panelIcType);
+      return palette.names[hanshowNearestIndex(r, g, b, palette.rgb)];
+    }
     if (colorScheme === 6) {
       const y = 0.299 * r + 0.587 * g + 0.114 * b;
       const lev = Math.min(15, Math.max(0, Math.round((y * 15) / 255)));
@@ -3595,7 +3619,11 @@ class OpenDisplayBLE {
    * @param {number} colorScheme - Color scheme (0-8)
    * @returns {Array} RGB array [r, g, b] of nearest color
    */
-  findNearestColor(r, g, b, colorScheme) {
+  findNearestColor(r, g, b, colorScheme, rgbPalette = 'observed7', panelIcType = null) {
+    if (colorScheme === 10) {
+      const palette = hanshowRgbPalette(rgbPalette, panelIcType);
+      return palette.rgb[hanshowNearestIndex(r, g, b, palette.rgb)].slice();
+    }
     if (colorScheme === 6) {
       const y = 0.299 * r + 0.587 * g + 0.114 * b;
       const lev = Math.min(15, Math.max(0, Math.round((y * 15) / 255)));
@@ -3683,14 +3711,30 @@ class OpenDisplayBLE {
    * @param {number[]|null} ditherWireMap - Palette index to wire value
    * @returns {Uint8Array}
    */
-  buildWireCodes(pixels, count, colorScheme, panelIcType, ditherIndices, ditherWireMap) {
+  buildWireCodes(pixels, count, colorScheme, panelIcType, ditherIndices, ditherWireMap, rgbPalette = 'observed7') {
     const codes = new Uint8Array(count);
+    if (colorScheme === 10) {
+      this._validateHanshowPanel(panelIcType);
+      hanshowRgbPalette(rgbPalette, panelIcType);
+      if (ditherIndices && (!ditherWireMap || ditherIndices.length !== count)) {
+        throw new Error('Hanshow dithered indices require a complete palette mapping');
+      }
+    }
     if (ditherIndices && ditherWireMap && ditherIndices.length === count) {
+      if (colorScheme === 10 && Array.from(ditherIndices).some(i => !Number.isInteger(ditherWireMap[i]) || ditherWireMap[i] < 0 || ditherWireMap[i] > 15)) {
+        throw new Error('Invalid Hanshow palette mapping');
+      }
       for (let i = 0; i < count; i++) codes[i] = ditherWireMap[ditherIndices[i]] ?? 0;
       return codes;
     }
 
-    if (colorScheme === 4 || colorScheme === 7 || colorScheme === 8) {
+    if (colorScheme === 10) {
+      const palette = hanshowRgbPalette(rgbPalette, panelIcType);
+      for (let i = 0; i < count; i++) {
+        const p = i * 4;
+        codes[i] = palette.codes[hanshowNearestIndex(pixels[p], pixels[p + 1], pixels[p + 2], palette.rgb)];
+      }
+    } else if (colorScheme === 4 || colorScheme === 7 || colorScheme === 8) {
       // Schemes 4/8 (Spectra 6) and scheme 7 (ACeP) use different nibble codes for the same
       // colors, so the table is selected per scheme rather than shared. Scheme 7
       // keeps Spectra 6's yellow=2/red=3 but moves blue and green down to 4/5 to
@@ -3754,6 +3798,65 @@ class OpenDisplayBLE {
     return codes;
   }
 
+  _validateHanshowPanel(panelIcType, width = null, height = null) {
+    const geometry = { 1035: [200, 200], 1036: [152, 296] }[Number(panelIcType)];
+    if (!geometry) throw new Error('INDEXED16_2PASS requires a supported Hanshow panel');
+    if (width != null && (width !== geometry[0] || height !== geometry[1])) {
+      throw new Error(`Hanshow input must be exactly ${geometry[0]}x${geometry[1]}`);
+    }
+  }
+
+  _packHanshowCodes(codes, width, height, panelIcType = 1036) {
+    // The 154 scans columns from left to right, top to bottom within each
+    // column. The 266 scans rows from bottom to top, left to right within a row.
+    const transposed = Number(panelIcType) === 1035;
+    const linePixels = transposed ? height : width;
+    const lineCount = transposed ? width : height;
+    const lineBytes = Math.ceil(linePixels / 4);
+    const componentBytes = lineBytes * lineCount;
+    const output = new Uint8Array(componentBytes * 2);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let line = 0; line < lineCount; line++) {
+        for (let pixel = 0; pixel < linePixels; pixel++) {
+          const source = transposed
+            ? pixel * width + line
+            : (height - 1 - line) * width + pixel;
+          output[pass * componentBytes + line * lineBytes + (pixel >> 2)] |=
+            ((codes[source] >> (pass === 0 ? 2 : 0)) & 3) << (6 - (pixel & 3) * 2);
+        }
+      }
+    }
+    return output;
+  }
+
+  /** Exact indices (one byte each) or packed4 (high nibble first), native geometry.
+   * semantics must be 'indices' or 'drive-codes'; no fitting or dithering occurs. */
+  encodeHanshowExact(input, width, height, panelIcType, { format = 'indices', semantics = 'indices' } = {}) {
+    this._validateHanshowPanel(panelIcType, width, height);
+    if (!['indices', 'packed4'].includes(format) || !['indices', 'drive-codes'].includes(semantics)) {
+      throw new Error('Declare indices/packed4 format and indices/drive-codes semantics');
+    }
+    if (!(input instanceof Uint8Array)) throw new Error('Exact input must be Uint8Array');
+    const count = width * height;
+    const required = format === 'packed4' ? Math.ceil(count / 2) : count;
+    if (input.length !== required) throw new Error(`Exact input requires ${required} bytes`);
+    const codes = new Uint8Array(count);
+    for (let i = 0; i < count; i++) {
+      const value = format === 'packed4' ? ((input[i >> 1] >> (i % 2 === 0 ? 4 : 0)) & 15) : input[i];
+      if (value > 15) throw new Error('Exact indices must be in 0..15');
+      codes[i] = semantics === 'drive-codes' ? value : HANSHOW_INDEX_TO_DRIVE[value];
+    }
+    return this._packHanshowCodes(codes, width, height, panelIcType);
+  }
+
+  async sendHanshowExact(input, width, height, panelIcType, options = {}) {
+    if (options.rotation != null && options.rotation !== 0) throw new Error('Exact Hanshow input uses native geometry and rotation 0');
+    this._validateHanshowPanel(panelIcType, width, height);
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    return this.sendCanvasToDisplay(canvas, 10, { ...options, rotation: 0, panelIcType, exactInput: input });
+  }
+
   /**
    * Encode canvas to byte array for display
    * @param {HTMLCanvasElement} canvas - Canvas element
@@ -3766,7 +3869,10 @@ class OpenDisplayBLE {
    * @param {number[]|null} ditherWireMap - Palette index to wire value (optional)
    * @returns {Array} Byte array representing the image
    */
-  encodeCanvasToByteData(canvas, colorScheme, rotation = 0, originalWidth = null, originalHeight = null, panelIcType = null, ditherIndices = null, ditherWireMap = null) {
+  encodeCanvasToByteData(canvas, colorScheme, rotation = 0, originalWidth = null, originalHeight = null, panelIcType = null, ditherIndices = null, ditherWireMap = null, rgbPalette = 'observed7') {
+    if (colorScheme === 10 && (!Number.isInteger(rotation) || rotation < 0 || rotation > 3)) {
+      throw new Error('Hanshow rotation must be in 0..3');
+    }
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     let imageWidth = imageData.width;
@@ -3780,7 +3886,8 @@ class OpenDisplayBLE {
       colorScheme,
       panelIcType,
       ditherIndices,
-      ditherWireMap
+      ditherWireMap,
+      rgbPalette
     );
 
     if (rotation === 1 || rotation === 3) {
@@ -3821,6 +3928,10 @@ class OpenDisplayBLE {
 
     const byteData = [];
 
+    if (colorScheme === 10) {
+      this._validateHanshowPanel(panelIcType, imageWidth, imageHeight);
+      return Array.from(this._packHanshowCodes(codes, imageWidth, imageHeight, panelIcType));
+    }
     if (colorScheme === 4 || colorScheme === 6 || colorScheme === 7 || colorScheme === 8) {
       // 4bpp, 2 pixels per byte: even x = high nibble, odd x = low. Scheme 8 (bwgbry_split)
       // packs the left half-plane first (all rows' left bytes), then the right half-plane,
@@ -4113,6 +4224,7 @@ class OpenDisplayBLE {
     const state = {
       active: true,
       mode: 'full',
+      colorScheme: prepared.colorScheme,
       compressed: prepared.compressed,
       chunks: prepared.chunks,
       chunkIndex: prepared.chunkIndex || 0,
@@ -4327,6 +4439,7 @@ class OpenDisplayBLE {
       panelIcType = null,
       ditherIndices = null,
       ditherWireMap = null,
+      rgbPalette = 'observed7',
       onProgress = null,
       onComplete = null,
       onStatusChange = null
@@ -4366,7 +4479,12 @@ class OpenDisplayBLE {
     }
     
     try {
-      const byteData = this.encodeCanvasToByteData(canvas, colorScheme, rotation, originalWidth, originalHeight, panelIcType, ditherIndices, ditherWireMap);
+      if (options.exactInput && colorScheme === 10 && rotation !== 0) {
+        throw new Error('Exact Hanshow input uses native geometry and rotation 0');
+      }
+      const byteData = options.exactInput && colorScheme === 10
+        ? Array.from(this.encodeHanshowExact(options.exactInput, canvas.width, canvas.height, panelIcType, options))
+        : this.encodeCanvasToByteData(canvas, colorScheme, rotation, originalWidth, originalHeight, panelIcType, ditherIndices, ditherWireMap, rgbPalette);
       const uncompressedSize = byteData.length;
       const byteDataUint8 = new Uint8Array(byteData);
       
@@ -4437,13 +4555,14 @@ if (supportsStreamingDecompression) {
       }
 
       const prepared = {
+        colorScheme,
         compressed: useCompressed,
         chunks,
         chunkIndex,
         onProgress,
         onComplete,
         onStatusChange,
-        useFastRefresh,
+        useFastRefresh: colorScheme === 10 ? false : useFastRefresh,
         chunkSize: DIRECT_WRITE_CHUNK_SIZE,
         pipelineSize: DIRECT_WRITE_PIPELINE_SIZE,
         trackPartial,
@@ -4595,6 +4714,7 @@ if (supportsStreamingDecompression) {
   _armDirectWriteAckTimer(label, timeoutMs = DIRECT_WRITE_ACK_TIMEOUT_MS) {
     if (!this.directWriteState || !this.directWriteState.active) return;
     this._clearDirectWriteAckTimer();
+    if (this.directWriteState.colorScheme === 10) timeoutMs = INDEXED16_2PASS_TIMEOUT_MS;
     this.directWriteState.ackTimeoutId = setTimeout(() => {
       if (!this.directWriteState || !this.directWriteState.active) return;
       this.log(`Direct write ack timeout (${label})`, 'error');
@@ -4735,9 +4855,10 @@ if (supportsStreamingDecompression) {
         return true;
       }
     } else if (responseType === 0x72) {
-      // End command ACK - upload fully delivered; the ack timer no longer applies
-      // (the refresh phase is bounded by the firmware's 0x74 refresh timeout).
+      // End command ACK: firmware bounds refresh with 0x74. Scheme 10 also
+      // keeps a client timer while its second panel pass completes.
       this._clearDirectWriteAckTimer();
+      if (this.directWriteState.colorScheme === 10) this._armDirectWriteAckTimer('refresh', INDEXED16_2PASS_TIMEOUT_MS);
       if (!this.directWriteState.refreshStartTime) {
         this.directWriteState.refreshStartTime = Date.now();
         this.log('Display is refreshing...', 'info');
@@ -4823,7 +4944,7 @@ if (supportsStreamingDecompression) {
    * has not already probed the device as pipe-unsupported.
    */
   _pipeEligible(prepared) {
-    return prepared.transmissionModes != null &&
+    return prepared.colorScheme !== 10 && prepared.transmissionModes != null &&
            (prepared.transmissionModes & TRANSMISSION_MODE_PIPE_WRITE) !== 0 &&
            !(this.pipeProbe.probed && !this.pipeProbe.supported);
   }

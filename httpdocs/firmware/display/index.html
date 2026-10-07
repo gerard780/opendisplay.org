@@ -754,6 +754,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
                         <option value="4" selected>B/W + Green + Blue + Red + Yellow (6-color)</option>
                         <option value="5">4 Grayscale</option>
                         <option value="6">16 Grayscale (4bpp)</option>
+          <option value="10">Hanshow 16 drive codes (7 provisional RGB states)</option>
                         <option value="7">B/W + Green + Blue + Red + Yellow + Orange (7-color)</option>
                         <option value="8">6-color split (left half-plane then right; dual-CS)</option>
                     </select>
@@ -1088,6 +1089,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
       <script src="/js/pako.js"></script>
       <script src="/js/js-yaml.min.js"></script>
       <script src="/l/qrcode.js"></script>
+      <script src="/js/hanshow-rgb-palettes.js"></script>
       <script src="/js/ble-common.js"></script>
       <script type="module" src="/js/dither.js"></script>
       <script src="/js/opendisplay-msd.js"></script>
@@ -1097,6 +1099,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
         widthInput = 800;
         heightInput = 480;
         let deviceDisplayConfigReady = false;
+        let connectedDisplayColorScheme = null;
         let deviceEncryptionRequired = false;
         let activeWidthMm = 0;
         let activeHeightMm = 0;
@@ -1181,14 +1184,15 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
             }),
             ['#000000', '#ffffff', '#ff0000', '#ffff00', '#00ff00', '#0000ff', '#ff8000'],
         ];
+        PALETTE[10] = ['#000000', '#ffffff', '#ffff00', '#ff0000', '#ff8000', '#c0c0c0', '#404040'];
         PALETTE[8] = PALETTE[4]; // bwgbry_split — same Spectra 6 swatches
         const SCHEME_SHORT = {
-            0: 'BW', 1: 'BWR', 2: 'BWY', 3: 'BWRY', 4: '6C', 5: '4G', 6: '16G', 7: '7C', 8: '6Cs'
+            0: 'BW', 1: 'BWR', 2: 'BWY', 3: 'BWRY', 4: '6C', 5: '4G', 6: '16G', 7: '7C', 8: '6Cs', 10: '16D'
         };
         // What the screen can show, in words people use (SCHEME_SHORT stays for logs).
         const SCHEME_FRIENDLY = {
             0: 'black & white', 1: 'black, white & red', 2: 'black, white & yellow', 3: 'black, white, red & yellow',
-            4: '6 colors', 5: '4 shades of gray', 6: '16 shades of gray', 7: '7 colors', 8: '6 colors'
+            4: '6 colors', 5: '4 shades of gray', 6: '16 shades of gray', 7: '7 colors', 8: '6 colors', 10: '7 provisional RGB states; 16 drive codes'
         };
         const SCHEME_NAMES = {
             0: 'Monochrome (B/W)',
@@ -1199,13 +1203,14 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
             5: '4 Grayscale',
             6: '16 Grayscale (4bpp)',
             7: 'B/W + Green + Blue + Red + Yellow + Orange (7-color)',
-            8: '6-color split (left half-plane then right; dual-CS)'
+            8: '6-color split (left half-plane then right; dual-CS)',
+            10: 'Hanshow 16 drive codes (7 provisional RGB states)'
         };
         function clampScheme(cs) {
             const n = parseInt(cs, 10);
-            if (n === 7 || n === 8) return n;
+            if ([0, 1, 2, 3, 4, 5, 6, 7, 8, 10].includes(n)) return n;
             if (Number.isNaN(n)) return 0;
-            return Math.min(Math.max(n, 0), 6);
+            throw new Error(`Unsupported color scheme ${n}`);
         }
         function setConnectedUI(connected) {
             const connectBtn = document.getElementById('connectbutton');
@@ -2340,7 +2345,10 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
         function fillColorSwatches(container, currentColor, onSelect) {
             if (!container) return;
             const scheme = getScheme();
-            const colors = PALETTE[scheme];
+            const profileId = document.getElementById('paletteSelect')?.value;
+            const colors = scheme === 10 && profileId === 'experimental12'
+                ? globalThis.OpenDisplayHanshowPalettes.resolve(profileId, displayPanelIcType).entries.map(e => '#' + e.rgb.map(c => c.toString(16).padStart(2, '0')).join(''))
+                : PALETTE[scheme];
             const cur = currentColor || '#000000';
             container.innerHTML = '';
             colors.forEach((hex) => {
@@ -2544,7 +2552,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
             // (a measured palette's "white" would otherwise sprinkle colored specks over it).
             const plain = !sourceImage || !baseImageData;
             const result = lib.dither(getBaseImageData(width, height), plain
-                ? { ...options, scheme, mode: 'none', paletteId: 'ideal' }
+                ? { ...options, scheme, mode: 'none', paletteId: scheme === 10 ? options.paletteId : 'ideal' }
                 : { ...options, scheme, mode });
             if (compositeInkOntoIndices(result.indices, width, height, result.preview)) recountDitherCounts(result);
             result.scheme = scheme;
@@ -3024,14 +3032,19 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
                 opt.value = value;
                 opt.textContent = label;
                 sel.appendChild(opt);
+                return opt;
             };
-            add('auto', auto ? `Auto — ${auto.label} (measured)` : 'Auto — ideal colors');
-            add('ideal', 'Ideal colors');
+            add('auto', scheme === 10 ? 'Auto — 7 provisional RGB states (uncalibrated)' : (auto ? `Auto — ${auto.label} (measured)` : 'Auto — ideal colors'));
+            add('ideal', scheme === 10 ? '7 provisional RGB states (uncalibrated)' : 'Ideal colors');
+            if (scheme === 10) {
+                const experimental = add('experimental12', 'Experimental 12 — uncalibrated (2.66-inch only)');
+                experimental.disabled = Number(displayPanelIcType) !== 1036;
+            }
             const canonical = lib.canonicalScheme(scheme);
             for (const m of lib.MEASURED) {
                 if (m.scheme === canonical) add(m.id, `${m.label} (measured)`);
             }
-            sel.value = [...sel.options].some(o => o.value === previous) ? previous : 'auto';
+            sel.value = [...sel.options].some(o => o.value === previous && !o.disabled) ? previous : 'auto';
         }
         function syncOriginalOverlay() {
             const overlay = document.getElementById('originalOverlay');
@@ -3117,7 +3130,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
                 const label = (lib.MODES.find(m => m.value === result.modeValue) || {}).label || result.modeValue;
                 const palette = result.measuredId
                     ? (lib.MEASURED.find(m => m.id === result.measuredId) || {}).label
-                    : 'ideal colors';
+                    : (result.paletteLabel || 'ideal colors');
                 // Without a photo nothing is dithered; don't make it look like the chosen setting was ignored.
                 summary.textContent = sourceImage
                     ? `${label} · ${palette} · ${result.ms.toFixed(0)} ms`
@@ -3127,7 +3140,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
             const legend = document.getElementById('inkLegend');
             if (!bar || !legend) return;
             const total = result.indices.length || 1;
-            const swatches = lib.idealPalette(scheme);
+            const swatches = result.preview;
             bar.innerHTML = '';
             legend.innerHTML = '';
             result.counts.forEach((count, i) => {
@@ -3446,11 +3459,13 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
             if (!canvas) return;
             if (!bleLib) { addLog("Connect to a display first so the encoder knows the panel format.", 'error'); return; }
             const scheme = currentColorScheme();
-            const usable = lastDither && lastDither.scheme === scheme ? lastDither : null;
+            const rgbPalette = document.getElementById('paletteSelect').value === 'experimental12' ? 'experimental12' : 'observed7';
+            const usable = lastDither && lastDither.scheme === scheme && (scheme !== 10 || lastDither.paletteId === rgbPalette) ? lastDither : null;
             const bytes = bleLib.encodeCanvasToByteData(
                 canvas, scheme, displayRotation, widthInput, heightInput, displayPanelIcType,
                 usable ? usable.indices : null,
-                usable ? usable.wireMap : null
+                usable ? usable.wireMap : null,
+                rgbPalette
             );
             downloadBlob(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), `opendisplay-${canvas.width}x${canvas.height}-scheme${scheme}.bin`);
             addLog(`Exported ${bytes.length} bytes for color scheme ${scheme}.`, 'info');
@@ -3484,6 +3499,8 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
                 document.getElementById(id).addEventListener('change', () => {
                     markPresetCustom();
                     saveTuning();
+                    updateDrawPalette();
+                    updateTextColorSwatches();
                     getPixelData();
                 });
             }
@@ -3625,6 +3642,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
                 panelIcType: displayPanelIcType,
                 ditherIndices: dither.indices,
                 ditherWireMap: dither.wireMap,
+                rgbPalette: dither.paletteId || 'observed7',
                 onProgress: extraOptions.onProgress || ((current, total) => {
                     const progress = Math.floor((current / total) * 100);
                     setProgressBar(true, progress);
@@ -3946,6 +3964,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
                     deviceRotation = Math.min(Math.max(rotation, 0), 3);
                     displayRotation = (deviceRotation + canvasRotation) % 4;
                     transmissionModes = tm;
+                    connectedDisplayColorScheme = colorScheme;
                     displayPanelIcType = displayCfg.panelIcType != null ? Number(displayCfg.panelIcType) : null;
                     displayPartialUpdateSupport = Number(displayCfg.partialUpdateSupport) || 0;
                     setPartialDemoUI(displayPartialUpdateSupport > 0);
@@ -4292,7 +4311,7 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
                     delete ditherSel.dataset.pendingMode;
                 }
                 if (paletteSel.dataset.pendingPalette) {
-                    if ([...paletteSel.options].some(o => o.value === paletteSel.dataset.pendingPalette)) {
+                    if ([...paletteSel.options].some(o => o.value === paletteSel.dataset.pendingPalette && !o.disabled)) {
                         paletteSel.value = paletteSel.dataset.pendingPalette;
                     }
                     delete paletteSel.dataset.pendingPalette;
@@ -4375,5 +4394,13 @@ button.color-swatch.selected:hover{box-shadow:0 0 0 2px var(--accent)!important}
       </div>
     </div>
   </footer>
+<script src="/js/hanshow-exact-input.js"></script>
+<script>
+mountHanshowExactInput(document.getElementById('canvasOptions'), () => ({
+  ble: bleLib, panelIcType: displayPanelIcType, width: widthInput, height: heightInput,
+  colorScheme: deviceDisplayConfigReady ? connectedDisplayColorScheme : null, transmissionModes,
+  authenticate: async () => { if (deviceEncryptionRequired) await ensureDeviceAuthenticated(); },
+}));
+</script>
 </body>
 </html>

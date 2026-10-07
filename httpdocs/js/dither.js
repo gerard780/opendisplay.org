@@ -1,3 +1,4 @@
+import './hanshow-rgb-palettes.js';
 // OpenDisplay dithering front-end for @opendisplay/epaper-dithering (Rust/WASM core).
 // Publishes window.OpenDisplayDither and fires 'opendisplay-dither-ready' once loaded.
 import {
@@ -62,6 +63,16 @@ const GRAY4_PANELS_V2 = new Set([0x28, 0x48]);
 const BWRY_CODES = [0, 1, 2, 3];
 const BWRY_CODES_SWAPPED = [0, 1, 3, 2];
 const BWRY_PANELS_SWAPPED = new Set([0x1d, 0x1e]);
+// Observed optical states, estimated RGB only: never expose these as measured.
+const HANSHOW_PROVISIONAL = {
+  colors: {
+    black: { r: 0, g: 0, b: 0 }, white: { r: 255, g: 255, b: 255 },
+    yellow: { r: 255, g: 255, b: 0 }, red: { r: 255, g: 0, b: 0 },
+    orange: { r: 255, g: 128, b: 0 }, lightgray: { r: 192, g: 192, b: 192 },
+    darkgray: { r: 64, g: 64, b: 64 },
+  }, accent: 'red',
+};
+const HANSHOW_MAP = [4, 5, 9, 13, 1, 6, 7, 0, 2, 3, 8, 10, 11, 12, 14, 15];
 const IDENTITY_16 = Array.from({ length: 16 }, (_, i) => i);
 
 /**
@@ -70,7 +81,7 @@ const IDENTITY_16 = Array.from({ length: 16 }, (_, i) => i);
  * @param {number|null} panelIcType Panel IC type, or null when unknown
  * @returns {number[]}
  */
-function wireMap(scheme, panelIcType = null) {
+function wireMap(scheme, panelIcType = null, paletteId = 'observed7') {
   const panel = panelIcType != null ? Number(panelIcType) : NaN;
   switch (Number(scheme)) {
     case 0: return [0, 1];
@@ -81,6 +92,10 @@ function wireMap(scheme, panelIcType = null) {
     case 8: return [0, 1, 2, 3, 5, 6];
     case 5: return GRAY4_PANELS_V2.has(panel) ? GRAY4_LUT_V2 : GRAY4_LUT;
     case 6: return IDENTITY_16;
+    case 10:
+      if (![1035, 1036].includes(panel)) throw new Error('Select a supported Hanshow panel for INDEXED16_2PASS');
+      if (paletteId !== 'observed7') return globalThis.OpenDisplayHanshowPalettes.resolve(paletteId, panel).entries.map(e => e.drive_code);
+      return HANSHOW_MAP.slice();
     case 7: return [0, 1, 2, 3, 4, 5, 6];
     default: return IDENTITY_16;
   }
@@ -110,12 +125,12 @@ function paletteForPanel(panelIcType, scheme) {
 
 /** Ideal sRGB colors for a scheme, in palette-index order. */
 function idealPalette(scheme) {
-  return Object.values(getPalette(Number(scheme)).colors);
+  return Object.values((Number(scheme) === 10 ? HANSHOW_PROVISIONAL : getPalette(Number(scheme))).colors);
 }
 
 /** Human-readable color names for a scheme, in palette-index order. */
 function paletteNames(scheme) {
-  return Object.keys(getPalette(Number(scheme)).colors);
+  return Object.keys((Number(scheme) === 10 ? HANSHOW_PROVISIONAL : getPalette(Number(scheme))).colors);
 }
 
 /**
@@ -148,7 +163,7 @@ function pickAuto(imageData) {
  * @param {number} opts.scheme Firmware color scheme (0-8)
  * @param {number|null} [opts.panelIcType]
  * @param {string} [opts.mode] Mode value from MODES ('auto' by default)
- * @param {string} [opts.paletteId] 'auto' | 'ideal' | measured palette id
+ * @param {string} [opts.paletteId] 'auto' | 'ideal' | measured palette id | 'observed7' | 'experimental12'
  * @param {boolean} [opts.realistic] Preview using measured RGB instead of ideal
  * @returns {{indices:Uint8Array,preview:Array,wireMap:number[],ms:number,modeValue:string,measuredId:string|null,counts:Uint32Array,names:string[]}}
  */
@@ -157,6 +172,11 @@ function dither(imageData, opts = {}) {
   const panelIcType = opts.panelIcType ?? null;
 
   const paletteId = opts.paletteId || 'auto';
+  const rgbPaletteId = scheme === 10 ? (['auto', 'ideal'].includes(paletteId) ? 'observed7' : paletteId) : null;
+  const rgbProfile = scheme === 10 ? globalThis.OpenDisplayHanshowPalettes.resolve(rgbPaletteId, panelIcType) : null;
+  const customPalette = rgbProfile && rgbPaletteId !== 'observed7' ? {
+    colors: Object.fromEntries(rgbProfile.entries.map(e => [e.name, {r:e.rgb[0], g:e.rgb[1], b:e.rgb[2]}])), accent: 'red',
+  } : HANSHOW_PROVISIONAL;
   let measured = null;
   if (paletteId === 'auto') {
     measured = paletteForPanel(panelIcType, scheme);
@@ -184,12 +204,12 @@ function dither(imageData, opts = {}) {
   const started = performance.now();
   const result = ditherImage(
     { width: imageData.width, height: imageData.height, data: imageData.data },
-    measured ? measured.palette : Number(scheme),
+    scheme === 10 ? customPalette : (measured ? measured.palette : Number(scheme)),
     settings,
   );
   const ms = performance.now() - started;
 
-  const ideal = idealPalette(scheme);
+  const ideal = scheme === 10 ? Object.values(customPalette.colors) : idealPalette(scheme);
   const preview = (measured && opts.realistic) ? result.palette : ideal;
 
   const counts = new Uint32Array(result.palette.length);
@@ -198,12 +218,14 @@ function dither(imageData, opts = {}) {
   return {
     indices: result.indices,
     preview,
-    wireMap: wireMap(scheme, panelIcType),
+    wireMap: wireMap(scheme, panelIcType, rgbPaletteId || 'observed7'),
+    paletteId: rgbPaletteId,
+    paletteLabel: rgbProfile ? (rgbProfile.experimental ? 'Experimental 12 — uncalibrated' : 'Seven provisional RGB states — uncalibrated') : null,
     ms,
     modeValue: auto ? modeLabelFor(mode) : modeValue,
     measuredId: measured ? measured.id : null,
     counts,
-    names: paletteNames(scheme),
+    names: scheme === 10 ? Object.keys(customPalette.colors) : paletteNames(scheme),
   };
 }
 
@@ -246,5 +268,6 @@ window.OpenDisplayDither = {
   idealPalette,
   paletteNames,
   pickAuto,
+  RGB_PROFILES: globalThis.OpenDisplayHanshowPalettes.profiles,
 };
 window.dispatchEvent(new Event('opendisplay-dither-ready'));
